@@ -1,4 +1,4 @@
-# BigBlueButton recordings client-side exporter
+# Client-side BigBlueButton recordings exporter
 
 This Python script allows you to download BigBlueButton recordings as `.mp4` videos, knowning just the URLs through which the recordings are publicly accessible.
 
@@ -28,7 +28,7 @@ Clone this repository or download its files. Assuming that:
 you just have to run the following command:
 
 ```
-python3 $SCRIPT_DIRECTORY/bbb_recordings_exporter $URL $OUTPUT_FILE_PATH
+python3 $SCRIPT_DIRECTORY/bbb_recordings_exporter.py $URL $OUTPUT_FILE_PATH
 ```
 
 You will have to wait an amount of time at least equal to the recording duration.
