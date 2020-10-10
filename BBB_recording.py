@@ -1,9 +1,11 @@
 import os
-import urllib.request
 import subprocess
+import logging
+import urllib.request
 import time
+import datetime
 
-from tqdm import tqdm
+from tqdm import trange
 
 from selenium import webdriver
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
@@ -21,11 +23,14 @@ class BBB_recording:
     url = None
     tmp_directory = None
     output_file = None
+
     webcam_file = None
     presentation_file = None
     trimmed_presentation_file = None
+
     duration = None
     wait = None
+
     width = None
     height = None
 
@@ -36,44 +41,39 @@ class BBB_recording:
 
         try:
             os.mkdir(tmp_directory)
-        except OSError:
-            print('Creation of the temporary directory failed')
-        else:
-            print('Temporary directory created at ' + tmp_directory)
+        except OSError as mkdir_exception:
+            raise mkdir_exception
 
-    def get_webcam(self, tmp_directory):
+    def get_webcam(self):
         domain = (self.url.split("/playback/"))[0]
         meeting_id = (self.url.split("?meetingId="))[1]
-
         extensions_to_try = [".mp4", ".webm"]
-        video_exists = False
 
         for extension in extensions_to_try:
             webcam_url = domain + "/presentation/" + \
                 meeting_id + "/video/webcams" + extension
             webcam_request = urllib.request.Request(webcam_url, method='HEAD')
+
             try:
                 urllib.request.urlopen(webcam_request)
             except:
-                print("Webcam video was NOT at " + webcam_url)
+                logging.info("Webcam video was not at " + webcam_url)
             else:
-                video_exists = True
-                urllib.request.urlretrieve(
-                    webcam_url, tmp_directory + "/webcam" + extension)
+                logging.info("Webcam video was at " + webcam_url)
                 self.webcam_file = self.tmp_directory + '/webcam' + extension
-                print("Webcam video was at " + webcam_url)
-
-        if video_exists == False:
-            print("Error while retrieving webcam video")
+                urllib.request.urlretrieve(webcam_url, self.webcam_file)
+                return
+        raise Exception("Error while retrieving webcam video")
 
     def set_duration(self):
-        shell_cmd = ['ffprobe', '-i', self.webcam_file,
+        shell_cmd = ['ffprobe',
+                     '-i', self.webcam_file,
                      '-show_entries', 'format=duration',
                      '-v', 'quiet',
-                     '-of', 'csv=%s'
-                     % ("p=0")]
+                     '-of', 'csv=%s' % ("p=0")]
         self.duration = round(float(subprocess.check_output(shell_cmd)))
-        print("The recording lasts " + str(self.duration) + ' seconds')
+        print("The playback lasts " +
+              str(datetime.timedelta(seconds=self.duration)))
 
     def get_presentation(self, width, height):
         self.width = width
@@ -90,21 +90,22 @@ class BBB_recording:
             ' -e SCREEN_WIDTH=' + str(width) + ' -e SCREEN_HEIGHT=' + str(height) + \
             ' -e FFMPEG_DRAW_MOUSE=0' + \
             ' elgalu/selenium'
-        # + ' -e FFMPEG_FRAME_RATE=15' + \
-        print(execute_shell_cmd(shell_cmd))
+        execute_shell_cmd(shell_cmd)
+        print('Selenium Docker container created')
 
         # Getting Selenium container port
         shell_cmd = "docker inspect" + \
             " --format='{{(index (index .NetworkSettings.Ports \"24444/tcp\") 0).HostPort}}' " + \
             selenium_container_name
-        selenium_container_port = (execute_shell_cmd(shell_cmd))[:-1]
-        print(selenium_container_port)
+        selenium_container_port = execute_shell_cmd(
+            shell_cmd).replace('\n', '')
 
         # Starting Selenium container
         shell_cmd = 'docker exec ' + \
             selenium_container_name + \
             ' wait_all_done 30s'
-        print(execute_shell_cmd(shell_cmd))
+        execute_shell_cmd(shell_cmd)
+        print('Selenium Docker container started')
 
         # Timestamp at recording start
         wait_start = time.time()
@@ -121,45 +122,60 @@ class BBB_recording:
                 EC.visibility_of_element_located(
                     (By.CLASS_NAME, 'acorn-play-button'))
             )
+        except:
+            raise Exception('Failed to start the playback')
         finally:
-            print('Trovato pulsante!')
             js_script = '(document.getElementsByClassName(\'webcam\'))[0].remove()'
             driver.execute_script(js_script)
             play_button.click()
 
+            # Wait 2 seconds for the start of the playback
+            time.sleep(2)
+
             # Timestamp at playback start
             wait_end = time.time()
+
+            # Seconds between the start of the recording and the start of the playback
             self.wait = round(wait_end - wait_start)
-            print('The play button appeared after ' +
-                  str(self.wait) + ' seconds')
+            print('The playback started ' + str(self.wait) +
+                  ' seconds after the beginning of the recording')
 
-            time.sleep(self.duration + 2)
+            # Wait until the end of the playback
+            # time.sleep(self.duration)
+            print('\nRecording the playback...')
+            for i in trange(self.duration):
+                time.sleep(1)
 
-            # Stop recording
+            print('\nSaving the recording...')
+
+            # Stopping the recording
             shell_cmd = 'docker exec ' + \
                 selenium_container_name + \
                 ' stop-video'
-            print(execute_shell_cmd(shell_cmd))
-
+            execute_shell_cmd(shell_cmd)
             driver.quit()
 
-        # Copying Selenium recording in tmp directory
+        # Copying Selenium recording in the tmp directory
         shell_cmd = 'docker cp ' + \
             selenium_container_name + ':/videos/. ' + \
             self.tmp_directory
-        print(execute_shell_cmd(shell_cmd))
+        execute_shell_cmd(shell_cmd)
+        print('Recording saved')
 
         # Deleting Selenium container
         shell_cmd = 'docker stop ' + \
             selenium_container_name
-        print(execute_shell_cmd(shell_cmd))
+        execute_shell_cmd(shell_cmd)
+        print('Selenium Docker container deleted')
 
         # Getting presentation file path
         shell_cmd = 'ls -1 ' + self.tmp_directory + '/vid*.mp4'
         self.presentation_file = execute_shell_cmd(shell_cmd).replace('\n', '')
-        print(self.presentation_file)
 
-    def export(self, upper_margin, lower_margin, webcam_width, webcam_height):
+    def export(self,
+               upper_margin, lower_margin,
+               webcam_width, webcam_height,
+               webcam_right_margin, webcam_lower_margin):
         output_height = self.height - upper_margin - lower_margin
         output_width = self.width
 
@@ -169,18 +185,25 @@ class BBB_recording:
         self.trimmed_presentation_file = self.tmp_directory + '/trimmed_presentation.mp4'
 
         shell_cmd = ['ffmpeg',
-                     '-ss', str(self.wait + 2),
+                     '-ss', str(self.wait),
                      '-i', self.presentation_file,
                      '-c', 'copy',
+                     '-loglevel', 'warning',
                      self.trimmed_presentation_file]
-        print(subprocess.check_output(shell_cmd))
+        subprocess.call(shell_cmd)
 
         shell_cmd = ['ffmpeg',
                      '-i', self.webcam_file,
                      '-i', self.trimmed_presentation_file,
                      '-filter_complex',
-                     '[1] crop=' + str(output_width) + ':' + str(output_height) + ':' + str(x) + ':' + str(y) + ' [c-p];' +
-                     '[0] scale=' + str(webcam_width) + ':' + str(webcam_height) + ' [w];' +
-                     '[c-p][w] overlay=main_w-overlay_w-50:main_h-overlay_h-8',
+                     '[1] crop=' + str(output_width) + ':' + str(output_height) + ':' + str(x) + ':' + str(y) + '[c-p];' +
+                     '[0] scale=' + str(webcam_width) + ':' + str(webcam_height) + '[w];' +
+                     '[c-p][w] overlay=main_w-overlay_w-' +
+                     str(webcam_right_margin) + ':main_h-overlay_h-' +
+                     str(webcam_lower_margin),
+                     '-loglevel', 'warning',
+                     '-stats',
                      self.output_file]
-        print(subprocess.check_output(shell_cmd))
+        print('\nExporting the recording...')
+        print(subprocess.check_output(shell_cmd).decode('utf-8'))
+        print('Recording export completed.\nThe video is available at ' + self.output_file)
