@@ -2,9 +2,11 @@ import os
 import subprocess
 import logging
 import urllib.request
+import requests
 import time
 import datetime
 
+from tqdm import tqdm
 from tqdm import trange
 
 from selenium import webdriver
@@ -45,25 +47,37 @@ class BBB_recording:
             raise mkdir_exception
 
     def get_webcam(self):
-        domain = (self.url.split("/playback/"))[0]
-        meeting_id = (self.url.split("?meetingId="))[1]
-        extensions_to_try = [".mp4", ".webm"]
+        domain = (self.url.split('/playback/'))[0]
+        meeting_id = (self.url.split('?meetingId='))[1]
+        extensions_to_try = ['.mp4', '.webm']
 
         for extension in extensions_to_try:
-            webcam_url = domain + "/presentation/" + \
-                meeting_id + "/video/webcams" + extension
+            webcam_url = domain + '/presentation/' + \
+                meeting_id + '/video/webcams' + extension
             webcam_request = urllib.request.Request(webcam_url, method='HEAD')
 
             try:
                 urllib.request.urlopen(webcam_request)
             except:
-                logging.info("Webcam video was not at " + webcam_url)
+                logging.info('Webcam video was not at ' + webcam_url)
             else:
-                logging.info("Webcam video was at " + webcam_url)
+                logging.info('Webcam video was at ' + webcam_url)
                 self.webcam_file = self.tmp_directory + '/webcam' + extension
-                urllib.request.urlretrieve(webcam_url, self.webcam_file)
+                print('Downloading webcam video...')
+                self.__download_file(webcam_url, self.webcam_file)
                 return
-        raise Exception("Error while retrieving webcam video")
+        raise Exception('Error while retrieving webcam video')
+
+    def __download_file(self, url, file_output):
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(file_output, 'wb') as f:
+                progress_bar = tqdm(
+                    total=int(r.headers['Content-Length']), unit='iB', unit_scale=True)
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        progress_bar.update(len(chunk))
 
     def set_duration(self):
         shell_cmd = ['ffprobe',
@@ -72,7 +86,7 @@ class BBB_recording:
                      '-v', 'quiet',
                      '-of', 'csv=%s' % ("p=0")]
         self.duration = round(float(subprocess.check_output(shell_cmd)))
-        print("The playback lasts " +
+        print('\nThe playback lasts ' +
               str(datetime.timedelta(seconds=self.duration)))
 
     def get_presentation(self, width, height):
@@ -89,12 +103,18 @@ class BBB_recording:
             ' -e VIDEO=true' + \
             ' -e SCREEN_WIDTH=' + str(width) + ' -e SCREEN_HEIGHT=' + str(height) + \
             ' -e FFMPEG_DRAW_MOUSE=0' + \
+            ' -e FFMPEG_CODEC_ARGS="-crf 0 -preset ultrafast -qp 0 -pix_fmt yuv420p"' + \
+            ' -e FFMPEG_FINAL_CRF=0' + \
+            ' -e VIDEO_TMP_FILE_EXTENSION="mkv"' + \
+            ' -e VIDEO_FILE_EXTENSION="mkv"' + \
+            ' -e VIDEO_FILE_NAME="presentation"' + \
             ' elgalu/selenium'
+#           ' -e FFMPEG_FRAME_RATE=15' + \
         execute_shell_cmd(shell_cmd)
-        print('Selenium Docker container created')
+        print('\nSelenium Docker container created')
 
         # Getting Selenium container port
-        shell_cmd = "docker inspect" + \
+        shell_cmd = 'docker inspect' + \
             " --format='{{(index (index .NetworkSettings.Ports \"24444/tcp\") 0).HostPort}}' " + \
             selenium_container_name
         selenium_container_port = execute_shell_cmd(
@@ -137,7 +157,7 @@ class BBB_recording:
 
             # Seconds between the start of the recording and the start of the playback
             self.wait = round(wait_end - wait_start)
-            print('The playback started ' + str(self.wait) +
+            print('\nThe playback started ' + str(self.wait) +
                   ' seconds after the beginning of the recording')
 
             # Wait until the end of the playback
@@ -169,7 +189,7 @@ class BBB_recording:
         print('Selenium Docker container deleted')
 
         # Getting presentation file path
-        shell_cmd = 'ls -1 ' + self.tmp_directory + '/vid*.mp4'
+        shell_cmd = 'ls -1 ' + self.tmp_directory + '/presentation.mkv'
         self.presentation_file = execute_shell_cmd(shell_cmd).replace('\n', '')
 
     def export(self,
