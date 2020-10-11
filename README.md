@@ -42,5 +42,8 @@ This Python script processes the BigBlueButton recording as follows:
 2. it downloads the webcam video file directly from the BigBlueButton server on which the recording is hosted;
 3. it merges the two videos obtained in the previous steps by making use of FFmpeg.
 
-## Special thanks
+## Special thanks 
 I thank [trahay](https://github.com/trahay), whose [bbb-downloader](https://github.com/trahay/bbb-downloader) really inspired me to carry out this project.
+
+> **DISCLAIMER:**
+This software uses BigBlueButton and is not endorsed or certified by BigBlueButton Inc. BigBlueButton and the BigBlueButton Logo are trademarks of BigBlueButton Inc.
